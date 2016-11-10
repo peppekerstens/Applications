@@ -3,7 +3,7 @@
 ### a DSC Configuration Document comprised of other DSC Resource instances. Consequently,
 ### the InstallClassic-Shell DSC Resource does not implement its own Get, Test, and Set methods.
 
-Configuration InstallClassic-Shell
+Configuration InstallClassicShell
 {
 
     Import-DSCResource -ModuleName PSDesiredStateConfiguration, OneGetPackage
@@ -21,7 +21,7 @@ Configuration InstallClassic-Shell
     }
 
     #INSTALL
-    OneGetPackage Classic-Shell
+    OneGetPackage ClassicShell
     {
         Name = 'Classic-Shell'
         Source = 'Chocolatey'

@@ -1,15 +1,5 @@
 ﻿Configuration Sample_InstallSilverlight
 {
-<#
-    param
-    (
-    [Parameter(Mandatory)]
-    $Language,
-
-    [Parameter(Mandatory)]
-    $LocalPath
-)
-#>  
     Import-DscResource -module Applications
 
     InstallSilverlight Silverlight {}

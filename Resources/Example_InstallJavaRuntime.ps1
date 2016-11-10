@@ -1,15 +1,5 @@
 ﻿Configuration Sample_InstallJavaRuntime
 {
-<#
-    param
-    (
-    [Parameter(Mandatory)]
-    $Language,
-
-    [Parameter(Mandatory)]
-    $LocalPath
-)
-#>  
     Import-DscResource -module Applications
 
     InstallJavaRuntime JavaRuntime {}

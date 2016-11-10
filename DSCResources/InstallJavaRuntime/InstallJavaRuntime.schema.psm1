@@ -21,7 +21,7 @@ Configuration InstallJavaRuntime
     }
 
     #INSTALL
-    OneGetPackage Jre8
+    OneGetPackage JavaRuntime
     {
         Name = 'javaruntime'
         Source = 'Chocolatey'
