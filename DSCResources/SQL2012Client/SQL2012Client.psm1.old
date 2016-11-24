@@ -1,0 +1,201 @@
+﻿# aanroep:  .\Install-DSCSQLClient.ps1 
+# installeert in default locatie (C:....)
+
+[CmdletBinding()]
+Param (
+	[string[]]$NodeName = ([System.Net.Dns]::GetHostEntry([string]$env:computername).HostName),
+	[String]$ResourcePath = '\\deploy.office-connect.nl\deploy',
+    [string]$ResourceUsername = 'deploy',
+    #[ValidateNotNull()] 
+    [string]$ResourcePassword = '@d0wnl0ad0nly',
+
+    [string]$SQLSKU = 'SQL2016EXPRADV_x64_ENU',
+    #[string]$SQLInstance = "SQLSERVER",
+	#[string]$InstallAccount = "administrator",
+	#[Parameter(Mandatory = $true)]
+	#[string]$InstallPassword,
+	[String]$InstallPath = 'C:\Support\Install' # Path to local install files for download
+)
+
+$NodeName = ($NodeName.Split('.'))[0]
+
+Configuration SQLClient
+{
+    param
+    (
+        #[string[]]$NodeName = 'localhost',
+        #[PSCredential]$SourceCredential,
+		[ValidateNotNull()]
+		[string]$SourceUsername,
+		[ValidateNotNull()] 
+		[string]$SourcePassword,
+		[String] $SourcePath,
+		[String] $SKU,
+		[String] $InstallPath,
+		[String] $Command = 'setup.exe',
+		[String] $Arguments = '/ACTION="Install" /QUIET="True" /FEATURES=CONN /IACCEPTSQLSERVERLICENSETERMS'
+    )
+
+    Import-DscResource -ModuleName PSDesiredStateConfiguration,xPendingReboot
+
+    Node @($AllNodes.Where{$_.Role.Name -ieq 'rdb'}.NodeName)
+    {
+		[string]$InstallPathResourceName = ($InstallPath -replace '\\','_') -replace ':',''
+		File "$($InstallPathResourceName)"   
+        {   
+            DestinationPath = $InstallPath          
+            Type = 'Directory' 
+            Ensure = 'Present'        
+        }
+
+		<#
+		Script "Download$($SKU)"
+		{
+			GetScript = {
+				return @{ 'Result' = "Dummy" }
+			}
+			SetScript = {
+				$SourceCredential = New-Object System.Management.Automation.PSCredential($USING:SourceUsername, (ConvertTo-SecureString $USING:SourcePassword -AsPlainText -Force))
+
+				$CopyFile = Split-Path -Path $USING:SourcePath -Leaf
+				$FreeDrive = (Get-ChildItem function:[d-z]: -Name|Where-Object {-Not(Test-Path $_)})[0]
+				New-PSDrive -Name ($FreeDrive.Trim(':')) –PSProvider FileSystem –Root (Split-Path -Path $USING:SourcePath -Parent) -Credential $SourceCredential
+				Copy-Item -Path "$($FreeDrive)\$($CopyFile)" -Destination $USING:InstallPath | Out-Null
+				Remove-PSDrive -Name ($FreeDrive.Trim(':'))
+			}
+			TestScript ={return $false}
+			DependsOn = "[File]$($InstallPathResourceName)"
+		}
+
+		Script "Unpack$($SKU)"
+		{
+			GetScript = {
+				return @{ 'Result' = "Dummy" }
+			}
+			SetScript = {
+				$CopyFile = Split-Path -Path $USING:SourcePath -Leaf
+				Start-Process -FilePath "$($USING:InstallPath)\$($CopyFile)" -ArgumentList "/q /x:$($USING:InstallPath)\$($CopyFile.Trim('.exe'))" -Wait
+			}
+			TestScript ={return $false}
+			DependsOn = "[Script]Download$($SKU)"
+		}
+
+		Package "Install$($SKU)"
+		{
+			Path = "$($InstallPath)\$($SKU)\$($Command)"
+			Name = "SQL Server 2016 Client Tools"
+			ProductId = 'A070F2AC-A75B-448C-BECB-B794EB7E0E0D'
+			Arguments = $Arguments
+			DependsOn = "[Script]Unpack$($SKU)"
+		}
+		#>
+
+		# SQl client alleen;
+		#http://download.microsoft.com/download/F/E/D/FEDB200F-DE2A-46D8-B661-D019DFE9D470/ENU/x64/sqlncli.msi  #2012 native client (0CC618CE-F36A-415E-84B4-FB1BFF6967E1)
+		#er is geen 2016 client, zie https://msdn.microsoft.com/nl-nl/library/ms131321.aspx
+		#msiexec /i sqlncli.msi /qn /IACCEPTSQLNCLILICENSETERMS=YES
+
+		#Product information; Get-WmiObject win32_product|ft IdentifyingNumber, Name, Version
+
+		$ResourceURI = @(
+			@{
+				URI = "http://download.microsoft.com/download/F/E/D/FEDB200F-DE2A-46D8-B661-D019DFE9D470/ENU/x64/sqlncli.msi" #2012 versie, er is geen 2016 client, zie https://msdn.microsoft.com/nl-nl/library/ms131321.aspx
+				ProductId = '0CC618CE-F36A-415E-84B4-FB1BFF6967E1'
+				Name = 'Microsoft Server 2012 native client'
+				Arguments = '/i C:\Support\Install\sqlncli.msi /quiet /norestart /IACCEPTSQLNCLILICENSETERMS=YES /log C:\Support\Logging\sqlncli.msi.log'
+			}
+			)
+
+		Foreach ($URI in $ResourceURI)
+		{
+			Script "Download$((Split-Path $URI.URI -Leaf).Trim('.msi'))"
+			{
+				SetScript = {
+					# Check whether DestinationPath's leaf is an existing folder
+					$FileName = Split-Path $USING:URI.URI -Leaf
+					if (Test-Path $USING:InstallPath -PathType Container)
+					{
+						$DestinationPath = Join-Path $USING:InstallPath $FileName
+					}
+				
+					Invoke-WebRequest -Uri $USING:URI.URI -OutFile $DestinationPath
+				}
+				TestScript = {
+					(Test-Path "$($USING:InstallPath)\$(Split-Path -Path $USING:URI.URI -Leaf)")
+				}
+				GetScript = { <# This must return a hash table #> }          
+			}
+
+			Package "Install$($URI.Name)"
+			{
+				Path = "$($env:windir)\system32\msiexec.exe"
+				Name = $URI.Name
+				ProductId = $URI.ProductId
+				Arguments = $URI.Arguments
+				DependsOn = "[Script]Download$((Split-Path $URI.URI -Leaf).Trim('.msi'))"
+			}		
+		}
+
+		#Source: http://www.integrationtrench.com/2014/10/handling-reboots-in-dsc-configuration.html
+		Script ForceReboot
+        {
+            GetScript  = { return 'foo'}
+            TestScript = { return $false}
+            SetScript  = { 
+                # Insert a delay before the reboot, otherwise the machine will be stuck in a reboot cycle
+                Start-Sleep -Seconds (180)
+ 
+                # Setting the global:DSCMachineStatus = 1 tells DSC that a reboot is required
+                $global:DSCMachineStatus = 1
+            }
+			DependsOn = "[Package]InstallMicrosoft Server 2012 native client"
+        }
+
+        xPendingReboot "RebootAfterInstall$($SKU)"
+        {
+            Name = "After$($SKU)Install"
+            DependsOn = '[Script]ForceReboot'
+        }
+    }
+}
+
+If ($SQLSKU -ilike "*2012*"){$SQLVersion = '11';$SKUType = '2012'}
+If ($SQLSKU -ilike "*2014*"){$SQLVersion = '12';$SKUType = '2014'}
+If ($SQLSKU -ilike "*2016*"){$SQLVersion = '13';$SKUType = '2016'}
+
+$ResourcePath = "$($ResourcePath)\Binaries\Microsoft\sql\$($SKUType)\$($SQLSKU).exe"
+
+#$ResourceURI = "https://gallery.technet.microsoft.com/scriptcenter/2d191bcd-3308-4edd-9de2-88dff796b0bc/file/41459/43/PSWindowsUpdate.zip"
+
+$ConfigData = @{
+    AllNodes = @(
+    @{
+        NodeName = '*'
+		PsDscAllowPlainTextPassword = $true 
+    }
+    @{
+        NodeName = $NodeName
+		PsDscAllowPlainTextPassword = $true 
+		#Thumbprint = $certificate.Thumbprint
+		Role = @( #Role(s) specific data for this node
+		@{
+			Name = 'rdb'
+		}
+        )
+    }
+    )
+}
+
+
+#$ResourceCredential = New-Object System.Management.Automation.PSCredential($ResourceUsername, (ConvertTo-SecureString $ResourcePassword -AsPlainText -Force))
+
+$MOFPath = 'C:\Support\MOF'
+If (!(Test-Path $MOFPath)){New-Item -Path $MOFPath -ItemType Directory}
+
+#SQLClient -ConfigurationData $ConfigData -OutputPath $MOFPath -SourceCredential $ResourceCredential -ResourceURI $ResourceURI -SKU $SQLSKU -InstallPath $InstallPath
+SQLClient -ConfigurationData $ConfigData -OutputPath $MOFPath -SourceUsername $ResourceUsername -SourcePassword $ResourcePassword -SourcePath $ResourcePath -SKU $SQLSKU -InstallPath $InstallPath
+
+#SQLClient -OutputPath $MOFPath -ResourceCredential $ResourceCredential -ResourceURI $ResourceURI -SQLSKU $SQLSKU -InstallPath $InstallPath
+
+
+Start-DscConfiguration -Path $MOFPath -ComputerName $NodeName -Wait -Force -Verbose
